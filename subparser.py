@@ -5,6 +5,7 @@ import functools
 import sys
 
 from six.moves import configparser
+from six import string_types
 
 
 class DispatchWrapper(object):
@@ -52,7 +53,7 @@ class Subcommand(object):
         '''
         decorator to wrap dispatch functions
         '''
-        if isinstance(name_or_func, basestring):
+        if isinstance(name_or_func, string_types):
             def _decorator(f):
                 return DispatchWrapper(self.subparser, f, name_or_func)
             return _decorator
