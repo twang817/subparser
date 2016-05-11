@@ -45,6 +45,7 @@ class Subcommand(object):
         parser_factory = functools.partial(type(parser), config)
         self.subparser = parser.add_subparsers(dest='command',
                                                parser_class=parser_factory)
+        self.subparser.required = True
         self.config_parser = None
         self.config_action = None
         self.config = config
@@ -139,11 +140,16 @@ class _ConfigAction(argparse.Action):
     and the config.
     '''
     ConfigTuple = collections.namedtuple('Config', 'source config')
+    ConfigImpl = None
 
     def __init__(self, *args, **kwargs):
         default = kwargs.pop('default', None)
         config = self.make_config()
-        config.load(default)
+        try:
+            config.load(default)
+        except IOError:
+            # ignore if the config file specified in ENV or in default does not exist
+            default = None
         super(_ConfigAction, self).__init__(*args, default=self.ConfigTuple(default, config), **kwargs)
 
     def __call__(self, parser, namespace, values, option_string=None):
@@ -152,7 +158,42 @@ class _ConfigAction(argparse.Action):
         setattr(namespace, self.dest, self.ConfigTuple(values, config))
 
     def make_config(self):
-        raise NotImplementedError
+        return self.ConfigImpl()
+
+
+class RawConfigParserImpl(configparser.RawConfigParser):
+    '''
+    A config object for RawConfigParserAction
+    '''
+    def get_default(self, setting):
+        '''
+        gets a value for config setting
+        '''
+        if not isinstance(setting, RawConfigParserAction.Setting):
+            return setting
+        try:
+            return self.get(setting.section, setting.option)
+        except (configparser.NoOptionError, configparser.NoSectionError):
+            return setting.default
+
+    def load(self, source):
+        '''
+        loads the config given a source.
+        '''
+        if source is not None:
+            with self.fetch(source) as fp:
+                self.readfp(fp)
+
+    @contextlib.contextmanager
+    def fetch(self, source):
+        '''
+        fetches a config given a source.
+        '''
+        fp = open(source, 'r')
+        try:
+            yield fp
+        finally:
+            fp.close()
 
 
 class RawConfigParserAction(_ConfigAction):
@@ -160,38 +201,7 @@ class RawConfigParserAction(_ConfigAction):
     an action for handling config options that are parsed via RawConfigParser.
     '''
     Setting = collections.namedtuple('Setting', 'section option default')
-
-    def make_config(outer_self):
-
-        class ConfigImpl(configparser.RawConfigParser):
-            def get_default(self, setting):
-                if not isinstance(setting, outer_self.Setting):
-                    return setting
-                try:
-                    return self.get(setting.section, setting.option)
-                except (configparser.NoOptionError, configparser.NoSectionError):
-                    return setting.default
-
-            def load(self, source):
-                '''
-                loads the config given a source.
-                '''
-                if source is not None:
-                    with self.fetch(source) as fp:
-                        self.readfp(fp)
-
-            @contextlib.contextmanager
-            def fetch(self, source):
-                '''
-                fetches a config given a source.
-                '''
-                fp = open(source, 'r')
-                try:
-                    yield fp
-                finally:
-                    fp.close()
-
-        return ConfigImpl()
+    ConfigImpl = RawConfigParserImpl
 
 
 def subparser(*args, **kwargs):
