@@ -138,3 +138,6 @@ def subparser(*args, **kwargs):
     _config = ConfigFacade()
     _parser = ConfigEnabledArgumentParser(_config, *args, **kwargs)
     return Subcommand(_parser, _config)
+
+
+subcommand = subparser()
