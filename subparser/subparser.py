@@ -1,13 +1,14 @@
 from __future__ import absolute_import
 
 import argparse
+import collections
 import functools
+import json
+import inspect
+import os
 
 from six import string_types
-
-from .config import _ConfigAction
-from .config import RawConfigParserAction
-from .config import RawConfigParserImpl
+from six.moves import configparser
 
 
 class DispatchWrapper(object):
@@ -34,19 +35,42 @@ class DispatchWrapper(object):
         return getattr(self.parser, attr)
 
 
+class ConfigAction(argparse.Action):
+    def __init__(self, *args, **kwargs):
+        self.env = kwargs.pop('env', None)
+        self.check_file_for = kwargs.pop('check_file_for', ('command',))
+        super(ConfigAction, self).__init__(*args, **kwargs)
+
+    def resolve_config(self, ns):
+        configfile = getattr(ns, self.dest, None)
+        if configfile:
+            return configfile, 'command' in self.check_file_for
+        if self.env:
+            configfile = os.getenv(self.env, None)
+            if configfile:
+                return configfile, 'env' in self.check_file_for
+        return self.default, 'default' in self.check_file_for
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+
+
 class Subcommand(object):
     '''
     multi-use object:
         - can be called to be used as a decorator to wrap dispatch functions
-        - dispatch allows us to process the command-line and run the dispatch function
-        - add_config adds an option to loads a config file prior to handling command-line options
+        - dispatch allows us to process the command-line and run the dispatch
+          function
+        - add_config adds an option to loads a config file prior to handling
+          command-line options
         - all other methods are passed to the main parser
     '''
     def __init__(self, parser, config):
         self.parser = parser
-        parser_factory = functools.partial(type(parser), config)
         self.subparser = parser.add_subparsers(dest='command',
-                                               parser_class=parser_factory)
+                                               parser_class=parser_factory(
+                                                   type(parser),
+                                                   config))
         self.subparser.required = True
         self.config_parser = None
         self.config_action = None
@@ -75,68 +99,186 @@ class Subcommand(object):
         add a config option to load config files prior to command-line
         '''
         self.config_parser = argparse.ArgumentParser(add_help=False)
-        self.config_action = self.config_parser.add_argument(*args, **kwargs)
-        self.parser._add_container_actions(self.config_parser)
+        self.config_action = self.config_parser.add_argument(*args, action=ConfigAction, **kwargs)
+        kwargs.pop('check_file_for', None)
+        self.parser.add_argument(*args, action=ConfigAction, check_file_for=[], **kwargs)
 
     def dispatch(self, args=None, namespace=None):
         '''
         process args and dispatch appropriate dispatch function
         '''
+        self.config.reset()
         if self.config_parser:
-            namespace, args = self.config_parser.parse_known_args(args, namespace)
-            self.config.impl = getattr(namespace, self.config_action.dest, None).config
+            ns, args = self.config_parser.parse_known_args(args, namespace)
+            configfile, required = self.config_action.resolve_config(ns)
+            if configfile:
+                try:
+                    self.config.load(configfile)
+                except Exception:
+                    if required:
+                        raise
+                else:
+                    self.parser.set_defaults(**{
+                        self.config_action.dest: collections.namedtuple('config', 'configfile config')(configfile, self.config)})
         ns = self.parser.parse_args(args, namespace)
-        return ns.func(ns)
+        return self._dispatch_to(ns.func, ns)
+
+    def _dispatch_to(self, func, ns):
+        '''
+        maps values in ns to function's argspec.
+
+        each argument's name in the function's spect is mapped to
+        the corresponding dest in the namespace.
+
+        Ex:
+
+        def foo(arg1, arg2):
+            arg1 and arg2 in the ns
+
+        def foo(arg1, arg2, **kwargs):
+            arg1 and arg2 in the ns
+            all other dests in ns goes into kwargs
+
+        def foo(*arg1):
+            args1 in the ns gets passed as varargs
+
+        def foo(*arg1, **kwargs):
+            args1 in the ns gets passed as varargs
+            all other dests in ns goes into kwargs
+
+        def foo(arg2, *args1, **kwargs):
+            arg2 in the ns
+            args1 in the ns gets passed as varargs
+            all other dests in ns goes into kwargs
+        '''
+        kwargs = {}
+        args = []
+        values = vars(ns)
+        consumed = []
+        spec = inspect.getargspec(func)
+        for arg in spec.args:
+            consumed.append(arg)
+            args.append(values[arg])
+        if spec.varargs:
+            if isinstance(values[spec.varargs], (list, tuple)):
+                args.extend(values[spec.varargs])
+            else:
+                args.append(values[spec.varargs])
+        if spec.keywords:
+            for k, v in values.items():
+                if k not in consumed:
+                    kwargs[k] = v
+        return func(*args, **kwargs)
 
 
-class ConfigFacade(object):
+class ConfigArgumentParser(argparse.ArgumentParser):
     '''
-    an object that allows ConfigEnabledArgumentParser to have no knowledge of
-    how to actually get a config setting.  defaults to a pass-through if no
-    implementation is configured.
+    an argparse.ArgumentParser that handles config files and environment
+    variables for arguments.
     '''
-    def __init__(self, impl=None):
-        self.impl = impl
+    def __init__(self, *args, **kwargs):
+        self._config = None
+        self._config_keys = {}
+        self._env = {}
+        super(ConfigArgumentParser, self).__init__(*args, **kwargs)
 
-    def get_default(self, setting):
-        if self.impl is None:
-            return setting
-        return self.impl.get_default(setting)
+    def _set_config(self, config):
+        self._config = config
 
-
-class ConfigEnabledArgumentParser(argparse.ArgumentParser):
-    '''
-    an argparse.ArgumentParser that resolves default values of type _ConfigSetting
-    prior to handling command-line options.
-    '''
-    def __init__(self, config, *args, **kwargs):
-        self.config = config
-        super(ConfigEnabledArgumentParser, self).__init__(*args, **kwargs)
+    def add_argument(self, *args, **kwargs):
+        config_key = kwargs.pop('config', None)
+        env = kwargs.pop('env', None)
+        action = super(ConfigArgumentParser, self).add_argument(*args, **kwargs)
+        if config_key:
+            self._config_keys[action.dest] = config_key
+        if env:
+            self._env[action.dest] = env
 
     def parse_known_args(self, args=None, namespace=None):
         # default Namespace built from parser defaults
         if namespace is None:
             namespace = argparse.Namespace()
 
-        # add any action defaults that aren't present
-        for action in self._actions:
-            if action.dest is not argparse.SUPPRESS:
-                if not hasattr(namespace, action.dest):
-                    if action.default is not argparse.SUPPRESS:
-                        setattr(namespace, action.dest, self.config.get_default(action.default))
-
-        # add any parser defaults that aren't present
-        for dest in self._defaults:
+        # add environment variables to namespace if not already set
+        for dest, env_var in self._env.items():
             if not hasattr(namespace, dest):
-                setattr(namespace, dest, self.config.get_default(self._defaults[dest]))
+                env = os.getenv(env_var, None)
+                if env:
+                    setattr(namespace, dest, env)
+
+        # if i have a valid config object, retrieve values and
+        # add them to the namespace if they don't already exist
+        if self._config and self._config.loaded:
+            for dest, config_key in self._config_keys.items():
+                if not hasattr(namespace, dest):
+                    value = self._config.get(config_key, argparse.SUPPRESS)
+                    if value is not argparse.SUPPRESS:
+                        setattr(namespace, dest, value)
 
         # call parse_known_args on parent
-        return super(ConfigEnabledArgumentParser, self).parse_known_args(args, namespace)
+        return super(ConfigArgumentParser, self).parse_known_args(args, namespace)
+
+
+class JsonConfig(object):
+    def __init__(self):
+        self.reset()
+
+    def load(self, source):
+        self.source = source
+        self.fetch(source)
+        self.loaded = True
+
+    def fetch(self, source):
+        with open(source, 'r') as f:
+            self.config = json.load(f)
+
+    def get(self, key, default):
+        return self.config.get(key, default)
+
+    def reset(self):
+        self.config = None
+        self.loaded = False
+        self.source = None
+
+
+class IniConfig(object):
+    Key = collections.namedtuple('IniKey', 'section option')
+
+    def __init__(self):
+        self.reset()
+
+    def load(self, source):
+        self.source = source
+        self.fetch(source)
+        self.loaded = True
+
+    def fetch(self, source):
+        with open(source, 'r') as f:
+            self.config.readfp(f)
+
+    def get(self, key, default):
+        try:
+            return self.config.get(key.section, key.option)
+        except (configparser.NoSectionError, configparser.NoOptionError):
+            return default
+
+    def reset(self):
+        self.config = configparser.RawConfigParser()
+        self.loaded = False
+        self.source = None
+
+
+def parser_factory(parser_class, config):
+    def _factory(*args, **kwargs):
+        parser = parser_class(*args, **kwargs)
+        parser._set_config(config)
+        return parser
+    return _factory
 
 
 def subparser(*args, **kwargs):
-    _config = ConfigFacade()
-    _parser = ConfigEnabledArgumentParser(_config, *args, **kwargs)
+    _config = kwargs.pop('config_class', JsonConfig)()
+    _parser = parser_factory(ConfigArgumentParser, _config)(*args, **kwargs)
     return Subcommand(_parser, _config)
 
 
