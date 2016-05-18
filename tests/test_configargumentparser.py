@@ -5,7 +5,7 @@ import json
 import os
 import pytest
 
-from subparser.subparser import ConfigArgumentParser
+from subparser.subparser import ConfigArgumentParser, ConfigFacade
 from subparser import subparser, JsonConfig, IniConfig
 
 
@@ -36,7 +36,9 @@ def mockconfig():
     config.config = {
         'foo': 'google'
     }
-    return config
+    facade = ConfigFacade()
+    facade.impl = config
+    return facade
 
 
 def clearenv(func):
@@ -329,7 +331,7 @@ def test_subparser_config_suppress_on_missing_env(capsys):
 
 @clearenv
 def test_subparser_config_ini(capsys, inifile):
-    subcommand = subparser(config_class=IniConfig)
+    subcommand = subparser()
 
     @subcommand
     def hello(name):
@@ -349,7 +351,7 @@ def test_subparser_config_ini(capsys, inifile):
         raise Exception('animal not found')
     blah.add_argument('--animal', env='ENV_ANIMAL', config=IniConfig.Key('speak', 'animal'), default='dog')
 
-    subcommand.add_config('-c', dest='config')
+    subcommand.add_config('-c', dest='config', config_class=IniConfig)
     os.environ['ENV_NAME'] = 'Eric'
     os.environ['ENV_ANIMAL'] = 'cat'
 

@@ -12,15 +12,15 @@ Usage:
     subcommand = subparser()
 
     @subcommand
-    def sub1(ns):
-        print 'top:', ns.top
-        print 'a:', ns.a
+    def sub1(a, top):
+        print 'top:', top
+        print 'a:', a
     sub1.add_argument('-a', type=int)
 
     @subcommand
-    def sub2(ns):
-        print 'top:', ns.top
-        print 'bg', ns.b
+    def sub2(b, top):
+        print 'top:', top
+        print 'b:', b
     sub2.add_argument('-b', type=int)
 
     if __name__ == '__main__':
@@ -31,42 +31,47 @@ Usage:
         subcommand.dispatch()
         sys.exit(0)
 
-Config File:
-============
+
+Config File (IniConfig):
+========================
 
 foo.ini:
 
-    [foo]
-    opt = iniopt
+    [hello]
+    name = Tommy
+
+    [speak]
+    animal = pig
 
 test.py:
 
-    import subparser
+    from __future__ import print_function
 
-    subcommand = subparser.subparser()
+    import json
+    import os
+
+    from subparser import subparser, IniConfig
+
+    subcommand = subparser()
 
     @subcommand
-    def foo(ns):
-        print 'foo', ns
-    foo.add_argument('--opt', type=str, default=subparser.RawConfigParserAction.Setting('foo', 'opt', 'defaultopt'))
+    def hello(name):
+        print('Hello %s!' % name)
+    hello.add_argument('--name', env='ENV_NAME', config=IniConfig.Key('hello', 'name'), default='John')
 
-    @subcommand
-    def bar(ns):
-        print 'bar', ns
-    bar.add_argument('--flag', type=str, default=subparser.RawConfigParserAction.Setting('bar', 'flag', 'defaultflag'))
+    @subcommand('speak')
+    def blah(animal):
+        if animal == 'dog':
+            return 'bark'
+        elif animal == 'cat':
+            return 'meow'
+        elif animal == 'pig':
+            return 'oink'
+        elif animal == 'duck':
+            return 'quack'
+        raise Exception('animal not found')
+    blah.add_argument('--animal', env='ENV_ANIMAL', config=IniConfig.Key('speak', 'animal'), default='dog')
 
-    subcommand.add_config('-c', default='foo.ini', action=subparser.RawConfigParserAction)
+    subcommand.add_config('-c', dest='config', default='foo.ini', config_class=IniConfig)
+
     subcommand.dispatch()
-
-
-    > python test.py foo
-    foo Namespace(c=Config(source='foo.ini', config=<subparser.ConfigImpl instance at 0x10b2f15f0>), command='foo', func=<function foo at 0x10b184140>, opt='iniopt')
-
-    > python test.py foo --opt cmdopt
-    foo Namespace(c=Config(source='foo.ini', config=<subparser.ConfigImpl instance at 0x106fff5f0>), command='foo', func=<function foo at 0x106e93140>, opt='cmdopt')
-
-    > python test.py bar --flag cmdflag
-    bar Namespace(c=Config(source='foo.ini', config=<subparser.ConfigImpl instance at 0x1031665f0>), command='bar', flag='cmdflag', func=<function bar at 0x10315c668>)
-
-    > python test.py bar
-    bar Namespace(c=Config(source='foo.ini', config=<subparser.ConfigImpl instance at 0x1066ab5f0>), command='bar', flag='defaultflag', func=<function bar at 0x1066a1668>)

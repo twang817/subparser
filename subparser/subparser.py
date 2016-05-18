@@ -98,6 +98,7 @@ class Subcommand(object):
         '''
         add a config option to load config files prior to command-line
         '''
+        self.config.impl = kwargs.pop('config_class', JsonConfig)()
         self.config_parser = argparse.ArgumentParser(add_help=False)
         self.config_action = self.config_parser.add_argument(*args, action=ConfigAction, **kwargs)
         kwargs.pop('check_file_for', None)
@@ -107,8 +108,8 @@ class Subcommand(object):
         '''
         process args and dispatch appropriate dispatch function
         '''
-        self.config.reset()
         if self.config_parser:
+            self.config.reset()
             ns, args = self.config_parser.parse_known_args(args, namespace)
             configfile, required = self.config_action.resolve_config(ns)
             if configfile:
@@ -119,7 +120,7 @@ class Subcommand(object):
                         raise
                 else:
                     self.parser.set_defaults(**{
-                        self.config_action.dest: collections.namedtuple('config', 'configfile config')(configfile, self.config)})
+                        self.config_action.dest: collections.namedtuple('config', 'configfile config')(configfile, self.config.impl)})
         ns = self.parser.parse_args(args, namespace)
         return self._dispatch_to(ns.func, ns)
 
@@ -208,7 +209,7 @@ class ConfigArgumentParser(argparse.ArgumentParser):
 
         # if i have a valid config object, retrieve values and
         # add them to the namespace if they don't already exist
-        if self._config and self._config.loaded:
+        if self._config and self._config.valid and self._config.loaded:
             for dest, config_key in self._config_keys.items():
                 if not hasattr(namespace, dest):
                     value = self._config.get(config_key, argparse.SUPPRESS)
@@ -217,6 +218,20 @@ class ConfigArgumentParser(argparse.ArgumentParser):
 
         # call parse_known_args on parent
         return super(ConfigArgumentParser, self).parse_known_args(args, namespace)
+
+
+class ConfigFacade(object):
+    def __init__(self):
+        self.impl = None
+
+    @property
+    def valid(self):
+        return self.impl is not None
+
+    def __getattr__(self, key):
+        if self.valid:
+            return getattr(self.impl, key)
+        raise Exception('getattr of %s called on an invalid facade' % key)
 
 
 class JsonConfig(object):
@@ -277,7 +292,7 @@ def parser_factory(parser_class, config):
 
 
 def subparser(*args, **kwargs):
-    _config = kwargs.pop('config_class', JsonConfig)()
+    _config = ConfigFacade()
     _parser = parser_factory(ConfigArgumentParser, _config)(*args, **kwargs)
     return Subcommand(_parser, _config)
 
