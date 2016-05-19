@@ -35,7 +35,9 @@ def mockconfig():
     config = JsonConfig()
     config.loaded = True
     config.config = {
-        'foo': 'google'
+        'foo': 'google',
+        'num1': 10.0,
+        'num2': '20',
     }
     facade = ConfigFacade()
     facade.impl = config
@@ -140,6 +142,32 @@ def test_command_over_all(mockconfig):
     ns = parser.parse_args(args)
     assert ns.foo == 'red'
     assert len(vars(ns)) == 1
+
+
+@clearenv
+def test_coerce_env():
+    os.environ['ENV_NUM'] = '10'
+    parser = ConfigArgumentParser(description='test program')
+    parser.add_argument('--num', env='ENV_NUM', default=0, type=int)
+    args = []
+    ns = parser.parse_args(args)
+    assert ns.num == 10
+    assert len(vars(ns)) == 1
+
+
+@clearenv
+def test_coerce_config(mockconfig):
+    parser = ConfigArgumentParser(description='test program')
+    parser.add_argument('--num1', config='num1', default=0, type=int)
+    parser.add_argument('--num2', config='num2', default=0, type=int)
+    parser._set_config(mockconfig)
+    args = []
+    ns = parser.parse_args(args)
+    # num1 did not coerce because it was not a string (matches argparse spec)
+    assert ns.num1 == 10.0
+    # num2 coerced because it was a string in the config
+    assert ns.num2 == 20
+    assert len(vars(ns)) == 2
 
 
 @clearenv

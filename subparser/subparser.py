@@ -191,9 +191,9 @@ class ConfigArgumentParser(argparse.ArgumentParser):
         env = kwargs.pop('env', None)
         action = super(ConfigArgumentParser, self).add_argument(*args, **kwargs)
         if config_key:
-            self._config_keys[action.dest] = config_key
+            self._config_keys[action.dest] = (action, config_key)
         if env:
-            self._env[action.dest] = env
+            self._env[action.dest] = (action, env)
 
     def parse_known_args(self, args=None, namespace=None):
         # default Namespace built from parser defaults
@@ -201,19 +201,23 @@ class ConfigArgumentParser(argparse.ArgumentParser):
             namespace = argparse.Namespace()
 
         # add environment variables to namespace if not already set
-        for dest, env_var in self._env.items():
+        for dest, (action, env_var) in self._env.items():
             if not hasattr(namespace, dest):
                 env = os.getenv(env_var, None)
                 if env:
-                    setattr(namespace, dest, env)
+                    # values from env are always string types
+                    setattr(namespace, dest, self._get_value(action, env))
 
         # if i have a valid config object, retrieve values and
         # add them to the namespace if they don't already exist
         if self._config and self._config.valid and self._config.loaded:
-            for dest, config_key in self._config_keys.items():
+            for dest, (action, config_key) in self._config_keys.items():
                 if not hasattr(namespace, dest):
                     value = self._config.get(config_key, argparse.SUPPRESS)
                     if value is not argparse.SUPPRESS:
+                        # coerce type if its a string
+                        if isinstance(value, string_types):
+                            value = self._get_value(action, value)
                         setattr(namespace, dest, value)
 
         # call parse_known_args on parent
