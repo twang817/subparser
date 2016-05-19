@@ -11,6 +11,59 @@ from six import string_types
 from six.moves import configparser
 
 
+def ns_dispatch(func, ns, pass_ns=True):
+    '''
+    maps values in ns to function's argspec.
+
+    each argument's name in the function's spect is mapped to
+    the corresponding dest in the namespace.
+
+    Ex:
+
+    def foo(arg1, arg2):
+        arg1 and arg2 in the ns
+
+    def foo(arg1, arg2, **kwargs):
+        arg1 and arg2 in the ns
+        all other dests in ns goes into kwargs
+
+    def foo(*arg1):
+        args1 in the ns gets passed as varargs
+
+    def foo(*arg1, **kwargs):
+        args1 in the ns gets passed as varargs
+        all other dests in ns goes into kwargs
+
+    def foo(arg2, *args1, **kwargs):
+        arg2 in the ns
+        args1 in the ns gets passed as varargs
+        all other dests in ns goes into kwargs
+    '''
+    kwargs = {}
+    args = []
+    values = vars(ns)
+    consumed = []
+    spec = inspect.getargspec(func)
+    for arg in spec.args:
+        consumed.append(arg)
+        if arg == 'ns' and pass_ns:
+            args.append(ns)
+        else:
+            args.append(values[arg])
+    if spec.varargs:
+        if isinstance(values[spec.varargs], (list, tuple)):
+            args.extend(values[spec.varargs])
+        else:
+            args.append(values[spec.varargs])
+    if spec.keywords:
+        for k, v in values.items():
+            if k not in consumed:
+                kwargs[k] = v
+        if 'ns' not in consumed and pass_ns:
+            kwargs['ns'] = ns
+    return func(*args, **kwargs)
+
+
 class DispatchWrapper(object):
     '''
     wraps a dispatch function and creates a subparser out of it
@@ -19,7 +72,9 @@ class DispatchWrapper(object):
         self.func = func
         self.name = name or func.__name__
         self.parser = subparser.add_parser(self.name)
-        self.parser.set_defaults(func=self.func)
+        def dispatcher(ns):
+            return ns_dispatch(self.func, ns)
+        self.parser.set_defaults(func=dispatcher)
         functools.update_wrapper(self, self.func)
 
     def __call__(self, *args, **kwargs):
@@ -122,54 +177,7 @@ class Subcommand(object):
                     self.parser.set_defaults(**{
                         self.config_action.dest: collections.namedtuple('config', 'configfile config')(configfile, self.config.impl)})
         ns = self.parser.parse_args(args, namespace)
-        return self._dispatch_to(ns.func, ns)
-
-    def _dispatch_to(self, func, ns):
-        '''
-        maps values in ns to function's argspec.
-
-        each argument's name in the function's spect is mapped to
-        the corresponding dest in the namespace.
-
-        Ex:
-
-        def foo(arg1, arg2):
-            arg1 and arg2 in the ns
-
-        def foo(arg1, arg2, **kwargs):
-            arg1 and arg2 in the ns
-            all other dests in ns goes into kwargs
-
-        def foo(*arg1):
-            args1 in the ns gets passed as varargs
-
-        def foo(*arg1, **kwargs):
-            args1 in the ns gets passed as varargs
-            all other dests in ns goes into kwargs
-
-        def foo(arg2, *args1, **kwargs):
-            arg2 in the ns
-            args1 in the ns gets passed as varargs
-            all other dests in ns goes into kwargs
-        '''
-        kwargs = {}
-        args = []
-        values = vars(ns)
-        consumed = []
-        spec = inspect.getargspec(func)
-        for arg in spec.args:
-            consumed.append(arg)
-            args.append(values[arg])
-        if spec.varargs:
-            if isinstance(values[spec.varargs], (list, tuple)):
-                args.extend(values[spec.varargs])
-            else:
-                args.append(values[spec.varargs])
-        if spec.keywords:
-            for k, v in values.items():
-                if k not in consumed:
-                    kwargs[k] = v
-        return func(*args, **kwargs)
+        return ns.func(ns)
 
 
 class ConfigArgumentParser(argparse.ArgumentParser):

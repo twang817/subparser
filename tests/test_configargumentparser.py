@@ -1,11 +1,12 @@
 from __future__ import print_function
 
+import argparse
 import decorator
 import json
 import os
 import pytest
 
-from subparser.subparser import ConfigArgumentParser, ConfigFacade
+from subparser.subparser import ConfigArgumentParser, ConfigFacade, ns_dispatch
 from subparser import subparser, JsonConfig, IniConfig
 
 
@@ -386,3 +387,49 @@ def test_subparser_config_ini(capsys, inifile):
         subcommand.dispatch(['-h'])
     out, err = capsys.readouterr()
     assert '-c CONFIG' in [l.strip() for l in out.splitlines()]
+
+
+def test_ns_dispatch():
+    ns = argparse.Namespace()
+    setattr(ns, 'name', 'tommy')
+    setattr(ns, 'names', ['tommy', 'john', 'richard'])
+
+    def capitalize(name):
+        return name.upper()
+    assert ns_dispatch(capitalize, ns) == 'TOMMY'
+
+    def passns(ns):
+        return ns.name.upper()
+    assert ns_dispatch(passns, ns) == 'TOMMY'
+
+    def passnskwargs(**kwargs):
+        return kwargs['ns'].name.upper()
+    assert ns_dispatch(passns, ns) == 'TOMMY'
+
+    def passnskwargs(**kwargs):
+        return kwargs['name'].upper()
+    assert ns_dispatch(passnskwargs, ns) == 'TOMMY'
+
+    def passargs(*names):
+        return ','.join(name.upper() for name in names)
+    assert ns_dispatch(passargs, ns) == 'TOMMY,JOHN,RICHARD'
+
+
+# def test_pre(capsys):
+#     subcommand = subparser()
+
+#     def bar(c, d):
+#         return c + d
+
+#     @subcommand('foo')
+#     @subcommand.pre(bar, 'bar_result')
+#     def foo_handler(a, b, bar_result):
+#         print(a, b, bar_result)
+#     foo_handler.set_defaults(**{'a':1, 'b': 2, 'c': 3, 'd': 4})
+#     subcommand.dispatch(['foo'])
+#     out, err = capsys.readouterr()
+#     assert out == '1 2 7\n'
+
+#     foo_handler(2, 4, 10)
+#     out, err = capsys.readouterr()
+#     assert out == '2 4 10\n'
