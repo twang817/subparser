@@ -7,6 +7,7 @@ import json
 import inspect
 import os
 
+import decorator
 from six import string_types
 from six.moves import configparser
 
@@ -64,30 +65,21 @@ def ns_dispatch(func, ns, pass_ns=True):
     return func(*args, **kwargs)
 
 
-class DispatchWrapper(object):
+def DispatchWrapper(subparser, func, name=None):
     '''
-    wraps a dispatch function and creates a subparser out of it
+    creates a wrapper function that behaves both as the original function as
+    well as a subparser
     '''
-    def __init__(self, subparser, func, name=None):
-        self.func = func
-        self.name = name or func.__name__
-        self.parser = subparser.add_parser(self.name)
-        def dispatcher(ns):
-            return ns_dispatch(self.func, ns)
-        self.parser.set_defaults(func=dispatcher)
-        functools.update_wrapper(self, self.func)
-
-    def __call__(self, *args, **kwargs):
-        '''
-        allows wrapped function to still be called
-        '''
-        return self.func(*args, **kwargs)
-
-    def __getattr__(self, attr):
-        '''
-        provides access to ArgumentParser functions
-        '''
-        return getattr(self.parser, attr)
+    name = name or func.__name__
+    parser = subparser.add_parser(name)
+    parser.set_defaults(func=functools.partial(ns_dispatch, func))
+    @decorator.decorator
+    def _wrapper(f, *args, **kwargs):
+        return f(*args, **kwargs)
+    wrapper = _wrapper(func)
+    for name, attr in inspect.getmembers(parser, inspect.ismethod):
+        setattr(wrapper, name, attr)
+    return wrapper
 
 
 class ConfigAction(argparse.Action):

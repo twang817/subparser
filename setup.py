@@ -16,7 +16,7 @@ setup(
     download_url='http://github.com/twang817/subparser/tarball/{version}'.format(version=version),
 
     packages=find_packages(),
-    install_requires=['six'],
+    install_requires=['decorator', 'six'],
 
     license='PSF',
 )

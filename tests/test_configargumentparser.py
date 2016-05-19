@@ -415,21 +415,15 @@ def test_ns_dispatch():
     assert ns_dispatch(passargs, ns) == 'TOMMY,JOHN,RICHARD'
 
 
-# def test_pre(capsys):
-#     subcommand = subparser()
-
-#     def bar(c, d):
-#         return c + d
-
-#     @subcommand('foo')
-#     @subcommand.pre(bar, 'bar_result')
-#     def foo_handler(a, b, bar_result):
-#         print(a, b, bar_result)
-#     foo_handler.set_defaults(**{'a':1, 'b': 2, 'c': 3, 'd': 4})
-#     subcommand.dispatch(['foo'])
-#     out, err = capsys.readouterr()
-#     assert out == '1 2 7\n'
-
-#     foo_handler(2, 4, 10)
-#     out, err = capsys.readouterr()
-#     assert out == '2 4 10\n'
+def test_argspec():
+    '''
+    this is more obscure.  basically, we're testing that we didn't change the
+    argspec of the original function when we wrapped it.
+    '''
+    subcommand = subparser()
+    @subcommand
+    def bar(a, b):
+        pass
+    import inspect
+    spec = inspect.getargspec(bar)
+    assert spec.args == ['a', 'b']
