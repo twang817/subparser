@@ -26,7 +26,13 @@ def jsonfile(tmpdir):
     p = tmpdir.join('config.json')
     with open(str(p), 'w') as f:
         json.dump({'name': 'Joe',
-                   'animal': 'pig'}, f)
+                   'animal': 'pig',
+                   'nested': {
+                       'dict': {
+                           'test': 'value',
+                        }
+                    }
+                   }, f)
     return str(p)
 
 
@@ -365,7 +371,7 @@ def test_subparser_config_ini(capsys, inifile):
     @subcommand
     def hello(name):
         print('Hello %s!' % name)
-    hello.add_argument('--name', env='ENV_NAME', config=IniConfig.Key('hello', 'name'), default='John')
+    hello.add_argument('--name', env='ENV_NAME', config=('hello', 'name'), default='John')
 
     @subcommand('speak')
     def blah(animal):
@@ -378,7 +384,7 @@ def test_subparser_config_ini(capsys, inifile):
         elif animal == 'duck':
             return 'quack'
         raise Exception('animal not found')
-    blah.add_argument('--animal', env='ENV_ANIMAL', config=IniConfig.Key('speak', 'animal'), default='dog')
+    blah.add_argument('--animal', env='ENV_ANIMAL', config=('speak', 'animal'), default='dog')
 
     subcommand.add_config('-c', dest='config', config_class=IniConfig)
     os.environ['ENV_NAME'] = 'Eric'
@@ -455,3 +461,16 @@ def test_argspec():
     import inspect
     spec = inspect.getargspec(bar)
     assert spec.args == ['a', 'b']
+
+def test_nested_json(capsys, jsonfile):
+    subcommand = subparser()
+
+    @subcommand
+    def hello(name):
+        print('Hello %s!' % name)
+    hello.add_argument('--name', config=('nested', 'dict', 'test'), default='John')
+
+    subcommand.add_config('-c', dest='config')
+    subcommand.dispatch(['hello', '-c', jsonfile])
+    out, err = capsys.readouterr()
+    assert out == 'Hello value!\n'

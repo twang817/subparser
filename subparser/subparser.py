@@ -252,7 +252,16 @@ class JsonConfig(object):
             self.config = json.load(f)
 
     def get(self, key, default):
-        return self.config.get(key, default)
+        if not isinstance(key, (tuple, list)):
+            key = (key,)
+
+        d = self.config
+        for k in key[:-1]:
+            if k in d:
+                d = d[k]
+            else:
+                return default
+        return d.get(key[-1], default)
 
     def reset(self):
         self.config = None
@@ -261,8 +270,6 @@ class JsonConfig(object):
 
 
 class IniConfig(object):
-    Key = collections.namedtuple('IniKey', 'section option')
-
     def __init__(self):
         self.reset()
 
@@ -277,7 +284,8 @@ class IniConfig(object):
 
     def get(self, key, default):
         try:
-            return self.config.get(key.section, key.option)
+            section, option = key
+            return self.config.get(section, option)
         except (configparser.NoSectionError, configparser.NoOptionError):
             return default
 
